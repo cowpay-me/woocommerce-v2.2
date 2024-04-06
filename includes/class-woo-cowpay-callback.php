@@ -21,41 +21,39 @@ class Cowpay_Server_Callback
         if (!$data) return $this->exit_error("not valid callback");
         // $checkSign = $this->is_valid_signature($data);
         // if (!$this->is_valid_signature($data)) return $this->exit_error("not valid signature");
-        $callback_type = "order_status_update";
-        switch ($callback_type) {
-            case 'charge_request':
-                // order created successfully
-                $this->handle_order_creation($data);
-                break;
-            case 'order_status_update':
-                $order_status = strtoupper($data['order_status']);
-                switch ($order_status) {
-                    case 'UNPAID':
+
+        $order_status = strtoupper($data['order_status']);
+
+
+        switch ($order_status) {
+            case 'PENDING':
+                       // order created successfully
+                       $this->handle_order_creation($data);
+                       break;
+
+                        case 'UNPAID':
                         $this->handle_unpaid($data);
                         break;
-                    case 'PAID':
+
+                        case 'PAID':
                         $this->handle_paid($data);
                         break;
-                    case 'EXPIRED':
+
+                        case 'EXPIRED':
                         $this->handle_expired($data);
                         break;
-                    case 'FAILED':
+
+                        case 'FAILED':
                         $this->handle_failed($data);
                         break;
-                    case 'DELIVERED':
+
+                        case 'DELIVERED':
                         // we are not handling cash-collection in this plugin yet
                         break;
-                    default:
-                        return $this->exit_error("unknown order status '$order_status'");
-                        break;
-                }
-                break;
-            case 'withdrawal_request':
-                # we are not handling withdrawals in this plugin yet
-                break;
             default:
                 return $this->exit_error("unknown callback request type '$callback_type'");
         }
+
         wp_die("callback successfully handled", 200);
     }
 
@@ -73,7 +71,7 @@ class Cowpay_Server_Callback
     {
         // get post data payload
         $data = json_decode(file_get_contents('php://input'), true);
-
+        (wc_get_logger())->info(wc_print_r( $data, true)."\n" , array('source' => 'cowpay-webhook'));
         // empty data?
         if (!isset($data) || empty($data)) return false;
 
@@ -81,13 +79,13 @@ class Cowpay_Server_Callback
             "merchant_code" =>$data['merchantCode'],
             "cowpay_reference_id" =>$data['cowpayReferenceId'],
             "merchant_reference_id" => $data['merchantReferenceId'],
-            //"payment_gateway_reference_id" => $data['paymentGatewayReferenceId'],
+            "payment_gateway_reference_id" => $data['paymentGatewayReferenceId'],
             "order_status" => $data['orderStatus'],
             "amount" => $data['amount'],
-            //"paymentMethod" => $data['paymentMethod']
+            "paymentMethod" => $data['paymentMethod']
         ];
         // check required fields
-        $required_data_keys = array("merchant_code","cowpay_reference_id", "merchant_reference_id", "order_status", "amount");
+        $required_data_keys = array("merchant_code","cowpay_reference_id", "merchant_reference_id", "order_status", "amount",'paymentMethod');
         foreach ($required_data_keys as $key) if (!isset($customData[$key])) return false;
         // we are safe now
         return $customData;
@@ -99,7 +97,7 @@ class Cowpay_Server_Callback
      */
     private function handle_order_creation($data)
     {
-        $merchant_reference_id =  $data["merchant_reference_id"];
+        $merchant_reference_id = explode("-",$data["merchant_reference_id"], 2)[0];
         $order = $this->find_order($merchant_reference_id);
         if ($order !== false) {
             // order already exists
@@ -116,7 +114,7 @@ class Cowpay_Server_Callback
      */
     private function create_order_recovery($data)
     {
-        $merchant_reference_id =  $data["merchant_reference_id"];
+        $merchant_reference_id = explode("-",$data["merchant_reference_id"], 2)[0];
         $order = wc_create_order(array('status' => "wc-processing"));
         $order->add_meta_data("cp_merchant_reference_id", $merchant_reference_id);
         $order->add_meta_data("cp_amount", $data['amount']);
@@ -137,7 +135,7 @@ class Cowpay_Server_Callback
 
     private function handle_paid($data)
     {
-        $merchant_reference_id =  $data["merchant_reference_id"];
+        $merchant_reference_id = explode("-",$data["merchant_reference_id"], 2)[0];
         $order = $this->find_order($merchant_reference_id);
         if ($order == false) {
             // TODO: log a warning message
@@ -152,11 +150,12 @@ class Cowpay_Server_Callback
 
     private function handle_unpaid($data)
     {
-        $merchant_reference_id =  $data["merchant_reference_id"];
+        $merchant_reference_id = explode("-",$data["merchant_reference_id"], 2)[0];
         $order = $this->find_order($merchant_reference_id);
         if ($order == false) {
             // TODO: log a warning message
             // don't create order as it is already expired
+
             return;
         }
         $order->update_status("wc-pending");
@@ -165,7 +164,7 @@ class Cowpay_Server_Callback
 
     private function handle_expired($data)
     {
-        $merchant_reference_id =  $data["merchant_reference_id"];
+        $merchant_reference_id = explode("-",$data["merchant_reference_id"], 2)[0];
         $order = $this->find_order($merchant_reference_id);
         if ($order == false) {
             // TODO: log a warning message
@@ -178,7 +177,7 @@ class Cowpay_Server_Callback
 
     private function handle_failed($data)
     {
-        $merchant_reference_id =  $data["merchant_reference_id"];
+        $merchant_reference_id = explode("-",$data["merchant_reference_id"], 2)[0];
         $order = $this->find_order($merchant_reference_id);
         if ($order == false) {
             // TODO: log a warning message
