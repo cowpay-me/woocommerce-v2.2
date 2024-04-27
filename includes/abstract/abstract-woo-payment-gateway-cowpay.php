@@ -97,7 +97,6 @@ abstract class WC_Payment_Gateway_Cowpay extends WC_Payment_Gateway
     {
         //* if meta key starts with underscore '_' character, it will be private
         //* and will not be shown in the order information in the dashboard.
-
         $setOrderMeta = function ($k, $v) use ($order) {
             update_post_meta($order->get_id(), $k, $v);
             // don't use this right now, as it doesn't update in the database.
