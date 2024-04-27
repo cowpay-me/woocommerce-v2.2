@@ -6,6 +6,7 @@
 class Cowpay_Server_Callback
 {
     private $settings;
+    
     function __construct()
     {
         $this->settings = Cowpay_Admin_Settings::getInstance();
@@ -18,12 +19,11 @@ class Cowpay_Server_Callback
     {
         if (!$this->is_cowpay_callback()) return; // die peacely if we are not the target
         $data = $this->get_callback_request_data();
+        (wc_get_logger())->info(wc_print_r( $data, true)."\n" , array('source' => 'cowpay-webhook'));
         if (!$data) return $this->exit_error("not valid callback");
         // $checkSign = $this->is_valid_signature($data);
         // if (!$this->is_valid_signature($data)) return $this->exit_error("not valid signature");
-
-        $order_status = strtoupper($data['order_status']);
-
+        $order_status = strtoupper($this->getOrderStatus($data['statusId']));
 
         switch ($order_status) {
             case 'PENDING':
@@ -32,7 +32,7 @@ class Cowpay_Server_Callback
                        break;
 
                         case 'UNPAID':
-                        $this->handle_unpaid($data);
+                            $this->handle_unpaid($data);
                         break;
 
                         case 'PAID':
@@ -46,10 +46,12 @@ class Cowpay_Server_Callback
                         case 'FAILED':
                         $this->handle_failed($data);
                         break;
-
+                        case 'REFUNDED':
+                            $this->handle_refund($data);
+                            break;
                         case 'DELIVERED':
-                        // we are not handling cash-collection in this plugin yet
-                        break;
+                            // we are not handling cash-collection in this plugin yet
+                            break;
             default:
                 return $this->exit_error("unknown callback request type '$callback_type'");
         }
@@ -82,10 +84,11 @@ class Cowpay_Server_Callback
             "payment_gateway_reference_id" => $data['paymentGatewayReferenceId'],
             "order_status" => $data['orderStatus'],
             "amount" => $data['amount'],
-            "paymentMethod" => $data['paymentMethod']
+            "paymentMethod" => $data['paymentMethod'],
+            'statusId' => $data['statusId']
         ];
         // check required fields
-        $required_data_keys = array("merchant_code","cowpay_reference_id", "merchant_reference_id", "order_status", "amount",'paymentMethod');
+        $required_data_keys = array("merchant_code","cowpay_reference_id", "merchant_reference_id", "order_status", "amount",'paymentMethod','statusId');
         foreach ($required_data_keys as $key) if (!isset($customData[$key])) return false;
         // we are safe now
         return $customData;
@@ -128,7 +131,7 @@ class Cowpay_Server_Callback
      */
     public function find_order($id)
     {
-        $order = wc_get_orders(array('cp_merchantReferenceId' => $id, 'limit' => 1));  //cp_merchant_reference_id
+        $order = wc_get_orders(array('cp_merchantReferenceId' => $id, 'limit' => 1));   //cp_merchant_reference_id
         if (empty($order)) return false;
         return $order[0];
     }
@@ -158,7 +161,7 @@ class Cowpay_Server_Callback
 
             return;
         }
-        $order->update_status("wc-pending");
+        $order->update_status("wc-processing");
         $order->add_order_note(__('server callback update: The order was unpaid','woo-cowpay'));
     }
 
@@ -188,6 +191,19 @@ class Cowpay_Server_Callback
         $order->add_order_note(esc_html__('server callback update: The order was failed','woo-cowpay'));
     }
 
+    private function handle_refund($data)
+    {
+        $merchant_reference_id = explode("-", $data["merchant_reference_id"], 2)[0];
+        $order = $this->find_order($merchant_reference_id);
+        if ($order == false) {
+            // TODO: log a warning message
+            // don't create order as it is already failed
+            return;
+        }
+        $order->update_status("wc-cancelled");
+        $order->add_order_note(esc_html__('server callback update: The order was refunded','woo-cowpay'));
+    }
+
     private function is_valid_signature($payload)
     {
         $callbackSign = md5("{$payload["merchantCode"]}{$payload["amount"]}{$payload["cowpay_reference_id"]}{$payload["merchant_reference_id"]}{$payload["order_status"]}");
@@ -213,5 +229,21 @@ class Cowpay_Server_Callback
     {
         // echo json_encode(array('error' => $cause, 'success' => false));
         wp_die($cause, 400);
+    }
+
+    public function getOrderStatus($statusId)
+    {
+        $orderStatus = [
+            1 =>'Pending',
+            2 =>'Paid',
+            3 =>'UnPaid',
+            4 =>'Expired',
+            5 =>'Failed',
+            6 =>'Refunded',
+            7 =>'PartiallyRefunded',
+        ];
+
+        $order_status = isset($orderStatus[$statusId]) ? $orderStatus[$statusId] : null;
+        return  $order_status;
     }
 }
